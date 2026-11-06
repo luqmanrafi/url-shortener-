@@ -1,0 +1,9 @@
+# SQLite databases & temp files
+# SQLite databases & temp files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db-journal
+*.db-wal
+*.db-shm
