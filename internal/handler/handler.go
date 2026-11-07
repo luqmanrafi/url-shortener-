@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -25,6 +26,8 @@ func (h *Handler) Routes()http.Handler{
 	mux.HandleFunc("POST /api/shorten", h.shorten)
 	mux.HandleFunc("GET /{code}", h.redirect)
 	mux.HandleFunc("GET /api/stats/{code}",h.stats)
+	mux.HandleFunc("GET /healthz", h.healthz)
+	mux.HandleFunc("GET /readyz", h.ready)
 	return mux
 }
 
@@ -104,6 +107,23 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request){
 		ClickCount: u.ClickCount,
 		CreatedAt: u.CreatedAt,
 	})
+}
+
+func (h *Handler) healthz(w http.ResponseWriter, r *http.Request){
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+func (h *Handler) ready(w http.ResponseWriter, r *http.Request){
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := h.svc.Ready(ctx); err != nil{
+		log.Printf("ready: %v", err)
+		writeError(w, http.StatusServiceUnavailable, "not ready")
+		// return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }
 
 

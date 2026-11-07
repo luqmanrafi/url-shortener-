@@ -22,6 +22,7 @@ type Repository interface {
 	FindByCode(ctx context.Context, code string)(string, error)
 	IncrementClick(ctx context.Context, code string)error
 	GetStats(ctx context.Context, code string)(*model.URL, error)
+	Ping(ctx context.Context)error
 }
 
 type Shortener struct{
@@ -67,6 +68,10 @@ func (s *Shortener) Resolve(ctx context.Context, code string)(string, error){
 
 func (s *Shortener) Stats(ctx context.Context, code string)(*model.URL, error){
 	return s.repo.GetStats(ctx, code)
+}
+
+func (s *Shortener) Ready(ctx context.Context)error{
+	return s.repo.Ping(ctx)
 }
 
 func validateURL(raw string) error {

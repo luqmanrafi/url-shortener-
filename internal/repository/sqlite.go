@@ -89,3 +89,7 @@ func (r *SQLite) GetStats(ctx context.Context, code string) (*model.URL, error) 
 	return &item, nil
 }
 
+func (r *SQLite) Ping(ctx context.Context) error{
+	return r.db.PingContext(ctx)
+}
+
