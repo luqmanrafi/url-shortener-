@@ -7,6 +7,9 @@ import (
 	"log"
 	"math/big"
 	"net/url"
+	"regexp"
+	"strings"
+	"time"
 
 	"github.com/luqmanrafi/urlshortener/internal/model"
 )
@@ -17,37 +20,58 @@ const (
 	maxRetries = 5
 )
 
+var aliasRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,30}$`)
+var reserved = map[string]bool{
+	"api": true, "healthz": true, "readyz": true,
+}
+
 type Repository interface {
-	Save(ctx context.Context, code, originalURL string) error
-	FindByCode(ctx context.Context, code string)(string, error)
-	IncrementClick(ctx context.Context, code string)error
-	GetStats(ctx context.Context, code string)(*model.URL, error)
-	Ping(ctx context.Context)error
+	Save(ctx context.Context, code, originalURL string, expiresAt *time.Time) error
+	FindByCode(ctx context.Context, code string) (*model.URL, error)
+	IncrementClick(ctx context.Context, code string) error
+	GetStats(ctx context.Context, code string) (*model.URL, error)
+	Ping(ctx context.Context) error
 }
 
-type Shortener struct{
+type Shortener struct {
 	repo Repository
+	now  func() time.Time
 }
 
-func New(repo Repository)*Shortener{
-	return &Shortener{repo: repo}
+func New(repo Repository) *Shortener {
+return &Shortener{repo: repo, now: time.Now}
 }
 
-func (s *Shortener) Shorten(ctx context.Context, rawURL string)(string, error){
-	if err:= validateURL(rawURL); err != nil{
+func (s *Shortener) Shorten(ctx context.Context, rawURL string, alias string, expiresIn time.Duration) (string, error) {
+	if err := validateURL(rawURL); err != nil {
 		return "", err
 	}
+	var expiresAt *time.Time
+	if expiresIn > 0 {
+		t := s.now().Add(expiresIn)
+		expiresAt = &t
+	}
 
-	for i := 0; i < maxRetries; i++{
-		code, err := generateCode()
-		if err != nil{
+	if alias != "" {
+		if err := validateAlias(alias); err != nil {
 			return "", err
 		}
-		err = s.repo.Save(ctx, code, rawURL)
-		if err == nil{
+		if err := s.repo.Save(ctx, alias, rawURL, expiresAt); err != nil {
+			return "", err
+		}
+		return alias, nil
+	}
+
+	for i := 0; i < maxRetries; i++ {
+		code, err := generateCode()
+		if err != nil {
+			return "", err
+		}
+		err = s.repo.Save(ctx, code, rawURL, expiresAt)
+		if err == nil {
 			return code, nil
 		}
-		if errors.Is(err, model.ErrCodeExists){
+		if errors.Is(err, model.ErrCodeExists) {
 			continue
 		}
 		return "", err
@@ -55,22 +79,25 @@ func (s *Shortener) Shorten(ctx context.Context, rawURL string)(string, error){
 	return "", errors.New("Failed to generate unique code")
 }
 
-func (s *Shortener) Resolve(ctx context.Context, code string)(string, error){
-	original, err := s.repo.FindByCode(ctx, code)
+func (s *Shortener) Resolve(ctx context.Context, code string) (string, error) {
+	u, err := s.repo.FindByCode(ctx, code)
 	if err != nil {
 		return "", err
 	}
-	if err := s.repo.IncrementClick(ctx, code); err != nil{
-		log.Printf("increment click %s: %v", code , err)
+	if u.ExpiresAt != nil && s.now().After(*u.ExpiresAt) {
+		return "", model.ErrExpired
 	}
-	return original, err
+	if err := s.repo.IncrementClick(ctx, code); err != nil {
+		log.Printf("increment click %s: %v", code, err)
+	}
+	return u.Original, err
 }
 
-func (s *Shortener) Stats(ctx context.Context, code string)(*model.URL, error){
+func (s *Shortener) Stats(ctx context.Context, code string) (*model.URL, error) {
 	return s.repo.GetStats(ctx, code)
 }
 
-func (s *Shortener) Ready(ctx context.Context)error{
+func (s *Shortener) Ready(ctx context.Context) error {
 	return s.repo.Ping(ctx)
 }
 
@@ -85,12 +112,22 @@ func validateURL(raw string) error {
 	return nil
 }
 
-func generateCode() (string, error){
+func validateAlias(alias string) error {
+	if !aliasRegex.MatchString(alias) {
+		return model.ErrInvalidAlias
+	}
+	if reserved[strings.ToLower(alias)] {
+		return model.ErrInvalidAlias
+	}
+	return nil
+}
+
+func generateCode() (string, error) {
 	b := make([]byte, codeLength)
 	max := big.NewInt(int64(len(alphabet)))
-	for i := range b{
+	for i := range b {
 		n, err := rand.Int(rand.Reader, max)
-		if err != nil{
+		if err != nil {
 			return "", err
 		}
 		b[i] = alphabet[n.Int64()]

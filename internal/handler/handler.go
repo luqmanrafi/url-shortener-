@@ -33,6 +33,8 @@ func (h *Handler) Routes()http.Handler{
 
 type shortenRequest struct {
 	URL string `json:"url"`
+	Alias string `json:"alias"`
+	ExpiresIn int `json:"expires_in"`
 }
 
 type shortenResponse struct{
@@ -55,13 +57,26 @@ func (h *Handler) shorten(w http.ResponseWriter, r *http.Request){
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if req.ExpiresIn < 0 {
+		writeError(w, http.StatusBadRequest, "expires_in must not be negative")
+		return
+	}
 
-	code, err := h.svc.Shorten(r.Context(), req.URL)
+	code, err := h.svc.Shorten(r.Context(), req.URL, req.Alias, time.Duration(req.ExpiresIn)*time.Second)
 	if err != nil {
 		if errors.Is(err, model.ErrInvalidUrl){
 			writeError(w, http.StatusBadRequest, "url must be valid http/https URL")
 			return
 		}
+		if errors.Is(err, model.ErrInvalidAlias){
+			writeError(w, http.StatusBadRequest, "alias must 3-30 chars (letters, numbers, - or _ ) and not reserved yet")
+			return
+		}
+		if errors.Is(err, model.ErrCodeExists){
+			writeError(w, http.StatusConflict, "alias already in use")
+			return
+		}
+		
 		log.Printf("shorten error: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -80,6 +95,10 @@ func (h *Handler) redirect(w http.ResponseWriter, r *http.Request){
 		if err != nil{
 			if errors.Is(err, model.ErrNotFound){
 				http.NotFound(w, r)
+				return
+			}
+			if errors.Is(err, model.ErrExpired){
+				http.Error(w, "link has expired", http.StatusGone)
 				return
 			}
 			log.Printf("resolve error: %v", err)
