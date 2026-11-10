@@ -1,1 +1,1 @@
-![test](https://github.com/USERNAME/REPO/actions/workflows/test.yml/badge.svg)
+![test](https://github.com/luqmanrafi/url-shortener-/actions/workflows/test.yml/badge.svg)
