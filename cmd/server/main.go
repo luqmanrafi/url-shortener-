@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luqmanrafi/urlshortener/internal/handler"
+	"github.com/luqmanrafi/urlshortener/internal/middleware"
 	"github.com/luqmanrafi/urlshortener/internal/repository"
 	"github.com/luqmanrafi/urlshortener/internal/service"
 )
@@ -20,6 +21,7 @@ func main(){
 	baseURL := getenv("BASE_URL", "http://localhost:"+port)
 	dbPath := getenv("DB_PATH", "urls.db")
 
+
 	repo, err := repository.NewSQLite(dbPath)
 	if err != nil {
 		log.Fatalf("init database: %v", err)
@@ -28,9 +30,11 @@ func main(){
 	svc := service.New(repo)
 	h := handler.New(svc, baseURL)
 
+	limiter := middleware.NewRateLimiter(5, 10)
+	handler := middleware.Logging(limiter.Middleware(h.Routes()))
 	srv := &http.Server{
 		Addr: ":" + port,
-		Handler: h.Routes(),
+		Handler: handler,
 		ReadHeaderTimeout: 5*time.Second,
 	}
 
